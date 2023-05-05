@@ -1,0 +1,16 @@
+[package]
+name = "uttt-rl"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "uttt_rl"
+crate-type = ["cdylib"]
+
+[dependencies]
+indicatif = { version = "*", features = ["rayon"] }
+once_cell = "*"
+pyo3 = { version = "*", features = ["extension-module"] }
+rand = "*"
+rayon = "*"
