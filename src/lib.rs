@@ -9,7 +9,7 @@ use mcts::MCTS;
 use pmcts::PMCTS;
 
 #[pymodule]
-fn uttt_rl(_py: Python, m: &PyModule) -> PyResult<()> {
+fn uttt_mcts(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<UTTTEnvImpl>()?;
     m.add_class::<MCTS>()?;
     m.add_class::<PMCTS>()?;

@@ -1,4 +1,4 @@
-from uttt_rl import UTTTEnvImpl, PMCTS, MCTS
+from uttt_mcts import UTTTEnvImpl, PMCTS, MCTS
 from rich import print
 
 
