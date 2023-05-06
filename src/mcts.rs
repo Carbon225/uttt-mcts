@@ -104,6 +104,10 @@ impl MCTS {
     pub fn tree_size(&self) -> usize {
         count_nodes(&self.nodes[self.root], &self.nodes)
     }
+
+    pub fn root_value(&self) -> f32 {
+        self.nodes[self.root].reward / self.nodes[self.root].visits as f32
+    }
 }
 
 fn count_nodes(node: &Node, tree: &Vec<Node>) -> usize {

@@ -4,23 +4,27 @@ from rich import print
 
 if __name__ == '__main__':
     g = UTTTEnvImpl()
-    mcts = MCTS(env=g, time_budget_s=0.1)
-    pmcts = PMCTS(time_budget_s=0.5)
+    mcts = MCTS(env=g, time_budget_s=1)
+    pmcts = PMCTS(time_budget_s=1)
     while True:
-        print('\n[green]X[/green] turn')
         action = mcts.run()
         mcts.move_root(action)
         obs, reward, done = g.step(action)
+        print('\n[green]X turn')
         print('Tree size:', mcts.tree_size())
+        print(f'[green]X root value: {mcts.root_value():.2f}')
         g.render()
         if done:
             break
 
-        print('\n[red]O[/red] turn')
         action = pmcts.run(g)
+        # x1, y1, x2, y2 = [int(x) - 1 for x in input('Enter action: ').strip()]
+        # action = x1 * 27 + y1 * 9 + x2 * 3 + y2
         mcts.move_root(action)
         obs, reward, done = g.step(action)
+        print('\n[red]O turn')
         print('Tree size:', mcts.tree_size())
+        print(f'[red]O root value: {mcts.root_value():.2f}')
         g.render()
         if done:
             break
