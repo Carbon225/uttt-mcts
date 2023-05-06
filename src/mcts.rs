@@ -9,21 +9,29 @@ struct Node {
     state: Game,
     visits: u32,
     reward: f32,
-    children: Vec<(Move, Option<Node>)>,
+    parent: Option<usize>,
+    action: Option<Move>,
+    children: Vec<(Move, Option<usize>)>,
 }
 
 impl Node {
-    fn new(state: Game) -> Self {
+    fn new(state: Game, parent: Option<usize>, action: Option<Move>) -> Self {
         Self {
+            parent,
             children: state.valid_moves().into_iter().map(|action| (action, None)).collect(),
             state,
             visits: 0,
             reward: 0.0,
+            action,
         }
     }
 
     fn fully_expanded(&self) -> bool {
-        self.children.iter().all(|(_, child)| child.is_some())
+        self.children.iter().all(|(_, node)| node.is_some())
+    }
+
+    fn is_terminal(&self) -> bool {
+        self.children.is_empty()
     }
 
     fn uct_value(&self, parent_visits: u32) -> f32 {
@@ -32,25 +40,21 @@ impl Node {
         self.reward / self.visits as f32 + UCT_C * ((parent_visits as f32).ln() / self.visits as f32).sqrt()
     }
 
-    fn best_child(&self) -> Option<usize> {
+    fn best_child(&self, tree: &Vec<Node>) -> Option<usize> {
         self.children
             .iter()
-            .filter_map(|(action, node)| match node {
-                Some(node) => Some((action, node)),
-                None => None,
-            })
-            .enumerate()
-            .max_by(|(_, (_, a)), (_, (_, b))|
-                a.uct_value(self.visits)
-                .partial_cmp(&b.uct_value(self.visits))
-                .unwrap())
-            .map(|(i, _)| i)
+            .filter_map(|(_, node)| *node)
+            .max_by(|a, b|
+                tree[*a].uct_value(self.visits)
+                    .partial_cmp(&tree[*b].uct_value(self.visits))
+                    .unwrap())
     }
 }
 
 #[pyclass]
 pub struct MCTS {
-    root: Node,
+    nodes: Vec<Node>,
+    root: usize,
     iterations: u32,
 }
 
@@ -59,7 +63,8 @@ impl MCTS {
     #[new]
     pub fn new(env: UTTTEnvImpl, iterations: u32) -> Self {
         MCTS {
-            root: Node::new(env.game),
+            nodes: vec![Node::new(env.game, None, None)],
+            root: 0,
             iterations,
         }
     }
@@ -68,22 +73,29 @@ impl MCTS {
         for _ in 0..self.iterations {
             self.iter();
         }
-        let best = self.root.best_child().unwrap();
-        move_to_action(self.root.children[best].0)
+        let best = self.nodes[self.root].best_child(&self.nodes).unwrap();
+        move_to_action(self.nodes[best].action.unwrap())
     }
 
     pub fn move_root(&mut self, action: u8) {
         let m = action_to_move(action);
-        let new_root = self.root.children.iter_mut()
+        let new_root = self.nodes[self.root].children.iter()
             .find_map(|(a, node)| if *a == m { Some(node) } else { None })
             .unwrap()
-            .take()
             .unwrap_or_else(|| {
-                let mut state = self.root.state.clone();
+                let mut state = self.nodes[self.root].state.clone();
                 state.make_move(m);
-                Node::new(state)
+                let new_node = Node::new(state, None, None);
+                self.nodes.push(new_node);
+                self.nodes.len() - 1
             });
         self.root = new_root;
+        self.nodes[self.root].parent = None;
+        self.nodes[self.root].action = None;
+    }
+
+    pub fn tree_size(&self) -> usize {
+        self.nodes.len()
     }
 }
 
@@ -100,36 +112,35 @@ fn rollout(mut state: Game) -> Option<Player> {
 impl MCTS {
     fn iter(&mut self) {
         // selection
-        let mut leaf = &mut self.root;
-        let mut trajectory = vec![];
-        while leaf.fully_expanded() && !leaf.state.is_over() {
-            let best = leaf.best_child().unwrap();
-            leaf = leaf.children[best].1.as_mut().unwrap();
-            trajectory.push(best);
+        let mut leaf = self.root;
+        while self.nodes[leaf].fully_expanded() && !self.nodes[leaf].is_terminal() {
+            leaf = self.nodes[leaf].best_child(&self.nodes).unwrap();
         }
 
         // expansion
-        if !leaf.state.is_over() {
-            let new_node = leaf.children
-                .iter()
-                .enumerate()
-                .filter_map(|(i, (_, child))| match child {
+        if !self.nodes[leaf].is_terminal() {
+            let new_id = self.nodes.len();
+            let (action, child) = self.nodes[leaf].children
+                .iter_mut()
+                .filter_map(|(action, child)| match child {
                     Some(_) => None,
-                    None => i.into(),
+                    None => Some((action, child)),
                 })
                 .choose(&mut rand::thread_rng())
                 .unwrap();
-            trajectory.push(new_node);
-            leaf.children[new_node].1 = Some(Node::new({
-                let mut state = leaf.state.clone();
-                state.make_move(leaf.children[new_node].0);
+            *child = Some(new_id);
+            let action = *action;
+            let new_node = Node::new({
+                let mut state = self.nodes[leaf].state.clone();
+                state.make_move(action);
                 state
-            }));
-            leaf = leaf.children[new_node].1.as_mut().unwrap();
+            }, Some(leaf), Some(action));
+            self.nodes.push(new_node);
+            leaf = new_id;
         }
 
         // simulation
-        let winner = rollout(leaf.state.clone());
+        let winner = rollout(self.nodes[leaf].state.clone());
         let reward_x = match winner {
             Some(Player::X) => 1.0,
             Some(Player::O) => 0.0,
@@ -142,19 +153,14 @@ impl MCTS {
         };
 
         // backpropagation
-        let mut node = &mut self.root;
-        node.visits += 1;
-        node.reward += match node.state.current_player().other() {
-            Player::X => reward_x,
-            Player::O => reward_o,
-        };
-        for i in trajectory {
-            node = node.children[i].1.as_mut().unwrap();
-            node.visits += 1;
-            node.reward += match node.state.current_player().other() {
+        let mut node = Some(leaf);
+        while let Some(n) = node {
+            self.nodes[n].visits += 1;
+            self.nodes[n].reward += match self.nodes[n].state.current_player().other() {
                 Player::X => reward_x,
                 Player::O => reward_o,
             };
+            node = self.nodes[n].parent;
         }
     }
 }

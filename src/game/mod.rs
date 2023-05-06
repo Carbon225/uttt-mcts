@@ -11,5 +11,5 @@ pub use game::Game;
 
 use utils::get_winner;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Move(pub (u8, u8), pub (u8, u8));
