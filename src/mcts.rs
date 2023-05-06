@@ -38,13 +38,20 @@ impl Node {
         self.reward / self.visits as f32 + UCT_C * ((parent_visits as f32).ln() / self.visits as f32).sqrt()
     }
 
-    fn best_child(&self, tree: &Vec<Node>) -> Option<usize> {
+    fn robust_child(&self, tree: &Vec<Node>) -> Option<usize> {
         self.children
             .iter()
             .filter_map(|(_, node)| *node)
-            .max_by(|a, b|
-                tree[*a].uct_value(self.visits)
-                    .partial_cmp(&tree[*b].uct_value(self.visits))
+            .max_by_key(|&child| tree[child].visits)
+    }
+
+    fn uct_child(&self, tree: &Vec<Node>) -> Option<usize> {
+        self.children
+            .iter()
+            .filter_map(|(_, node)| *node)
+            .max_by(|&a, &b|
+                tree[a].uct_value(self.visits)
+                    .partial_cmp(&tree[b].uct_value(self.visits))
                     .unwrap())
     }
 }
@@ -74,7 +81,7 @@ impl MCTS {
         while start.elapsed() < self.time_budget {
             self.iter();
         }
-        let best = self.nodes[self.root].best_child(&self.nodes).unwrap();
+        let best = self.nodes[self.root].robust_child(&self.nodes).unwrap();
         move_to_action(self.nodes[best].action.unwrap())
     }
 
@@ -95,8 +102,15 @@ impl MCTS {
     }
 
     pub fn tree_size(&self) -> usize {
-        self.nodes.len()
+        count_nodes(&self.nodes[self.root], &self.nodes)
     }
+}
+
+fn count_nodes(node: &Node, tree: &Vec<Node>) -> usize {
+    1 + node.children.iter()
+        .filter_map(|(_, child)|
+            child.map(|child| count_nodes(&tree[child], tree)))
+        .sum::<usize>()
 }
 
 fn rollout(mut state: Game) -> Option<Player> {
@@ -116,7 +130,7 @@ impl MCTS {
         // selection
         let mut leaf = self.root;
         while self.nodes[leaf].fully_expanded() && !self.nodes[leaf].is_terminal() {
-            leaf = self.nodes[leaf].best_child(&self.nodes).unwrap();
+            leaf = self.nodes[leaf].uct_child(&self.nodes).unwrap();
             state.make_move(self.nodes[leaf].action.unwrap());
         }
 
@@ -139,11 +153,13 @@ impl MCTS {
         }
 
         // simulation
-        let leaf_player = state.current_player().other();
-        let winner = rollout(state);
-        let mut reward = match (leaf_player, winner) {
-            (_, None) => 0.0,
-            (a, Some(b)) => if a == b { 1.0 } else { -1.0 },
+        let mut reward = {
+            let leaf_player = state.current_player().other();
+            let winner = rollout(state);
+            match (leaf_player, winner) {
+                (_, None) => 0.5,
+                (a, Some(b)) => if a == b { 1.0 } else { 0.0 },
+            }
         };
 
         // backpropagation
@@ -152,7 +168,7 @@ impl MCTS {
             self.nodes[n].visits += 1;
             self.nodes[n].reward += reward;
             node = self.nodes[n].parent;
-            reward = -reward;
+            reward = 1.0 - reward;
         }
     }
 }
