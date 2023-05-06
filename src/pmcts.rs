@@ -1,33 +1,30 @@
 use pyo3::prelude::*;
-use rayon::prelude::*;
 use rand::seq::SliceRandom;
 use crate::env::UTTTEnvImpl;
 
 #[pyclass]
 pub struct PMCTS {
-    simulations: u32,
+    time_budget: std::time::Duration,
 }
 
 #[pymethods]
 impl PMCTS {
     #[new]
-    pub fn new(simulations: u32) -> Self {
-        PMCTS { simulations }
+    pub fn new(time_budget_s: f32) -> Self {
+        PMCTS { time_budget: std::time::Duration::from_secs_f32(time_budget_s) }
     }
 
     pub fn run(&self, game: UTTTEnvImpl) -> u8 {
         let actions = game.valid_actions();
-        let n = self.simulations / (actions.len() as u32);
-        let rewards = actions
-            .iter()
-            .map(|action| {
+        let mut rewards = vec![0.0; actions.len()];
+        let start = std::time::Instant::now();
+        while start.elapsed() < self.time_budget {
+            for (i, action) in actions.iter().enumerate() {
                 let mut game = game.clone();
                 game.step(*action);
-                (0..n)
-                    .into_par_iter()
-                    .map(|_| self.rollout(game.clone()))
-                    .sum::<f32>()
-            });
+                rewards[i] += self.rollout(game);
+            }
+        }
         *actions
             .iter()
             .zip(rewards)
